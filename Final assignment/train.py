@@ -71,7 +71,9 @@ def get_args_parser():
 
 
 def main(args):
-    # Initialize wandb for logging
+    # Initialize wandb for loggin
+    wandb.login()
+
     wandb.init(
         project="5lsm0-cityscapes-segmentation",  # Project name in wandb
         name=args.experiment_id,  # Experiment name in wandb
