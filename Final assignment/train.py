@@ -12,9 +12,13 @@ allowing you to easily modify hyperparameters using a command-line argument pars
 
 Feel free to customize the script as needed for your use case.
 """
+### Regular imports - Start - ###
 import os
 from argparse import ArgumentParser
+### Regular imports - End - ###
 
+
+### Specific imports - Start - ###
 import wandb
 import torch
 import torch.nn as nn
@@ -30,9 +34,13 @@ from torchvision.transforms.v2 import (
     ToDtype,
     InterpolationMode
 )
+### Specific imports - End - ###
 
-from model import Model
+# Initial model
+# from model import Model
 
+# Efficient Net infrastructure import
+from efficientnet_pytorch import EfficientNet
 
 # Mapping class IDs to train IDs
 id_to_trainid = {cls.id: cls.train_id for cls in Cityscapes.classes}
@@ -63,16 +71,17 @@ def get_args_parser():
     parser.add_argument("--batch-size", type=int, default=64, help="Training batch size")
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument{"--lrs", nargs=2, type=float, default=[1e-5, 1e-3], help = "Differential learning rates for backbone and forebone"}
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for data loaders")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--experiment-id", type=str, default="unet-training", help="Experiment ID for Weights & Biases")
+    parser.add_argument("--experiment-id", type=str, default="efficientnet1-training", help="Experiment ID for Weights & Biases")
 
     return parser
 
 
 def main(args):
-    # Initialize wandb for loggin
-    wandb.login()
+    # # Initialize wandb for loggin
+    # wandb.login()
 
     wandb.init(
         project="5lsm0-cityscapes-segmentation",  # Project name in wandb
@@ -101,6 +110,7 @@ def main(args):
     Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
 
+    #TODO Find out what the target_transform do?
     # Target transform (mask)
     target_transform = Compose([
         ToImage(),
@@ -108,6 +118,7 @@ def main(args):
         ToDtype(torch.int64),  # no scaling
     ])
 
+    #TODO Find out what this do?
     # Load the dataset and make a split for training and validation
     train_dataset = Cityscapes(
     args.data_dir,
@@ -141,16 +152,33 @@ def main(args):
     )
 
     # Define the model
-    model = Model(
-        in_channels=3,  # RGB images
-        n_classes=19,  # 19 classes in the Cityscapes dataset
-    ).to(device)
+    # model = model_pretrained(
+    #     in_channels=3,  # RGB images
+    #     n_classes=19,  # 19 classes in the Cityscapes dataset
+    # ).to(device)
+
+    # 1. Declare the instance of the control class `EfficientNet`
+    # model = EfficientNet.from_name('efficientnet-b7') # Loading a not-pretrained model
+    model_pretrained = EfficientNet.from_pretrained('efficientnet-b7', num_classes=19) # Pretrained
+
+    # 2. Group Parameters for Differential Learning Rates
+    backbone_params:list = []
+    forebone_params:list = []
+
+    for _name, _param in model_pretrained.named_parameters():
+        if '_fc' in _name:
+            # # Debug statement 1 
+            # print("Name {}".format(_name, _param))
+            forebone_params.append(_param)
+        else:
+            backbone_params.append(_param)
 
     # Define the loss function
     criterion = nn.CrossEntropyLoss(ignore_index=255)  # Ignore the void class
 
     # Define the optimizer
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+    optimizer = AdamW([{'params':backbone_params, 'lr':args.lrs[0]},
+                       {'params':forebone_params, 'lr':args.lrs[1]}])
 
     # Training loop
     best_valid_loss = float('inf')
@@ -159,7 +187,8 @@ def main(args):
         print(f"Epoch {epoch+1:04}/{args.epochs:04}")
 
         # Training
-        model.train()
+        # model.train()
+        model_pretrained.train()
         for i, (images, labels) in enumerate(train_dataloader):
 
             labels = convert_to_train_id(labels)  # Convert class IDs to train IDs
@@ -168,7 +197,7 @@ def main(args):
             labels = labels.long().squeeze(1)  # Remove channel dimension
 
             optimizer.zero_grad()
-            outputs = model(images)
+            outputs = model_pretrained(images)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -180,7 +209,7 @@ def main(args):
             }, step=epoch * len(train_dataloader) + i)
             
         # Validation
-        model.eval()
+        model_pretrained.eval()
         with torch.no_grad():
             losses = []
             for i, (images, labels) in enumerate(valid_dataloader):
@@ -190,7 +219,7 @@ def main(args):
 
                 labels = labels.long().squeeze(1)  # Remove channel dimension
 
-                outputs = model(images)
+                outputs = model_pretrained(images)
                 loss = criterion(outputs, labels)
                 losses.append(loss.item())
             
@@ -227,13 +256,13 @@ def main(args):
                     output_dir, 
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
-                torch.save(model.state_dict(), current_best_model_path)
+                torch.save(model_pretrained.state_dict(), current_best_model_path)
         
     print("Training complete!")
 
     # Save the model
     torch.save(
-        model.state_dict(),
+        model_pretrained.state_dict(),
         os.path.join(
             output_dir,
             f"final_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
