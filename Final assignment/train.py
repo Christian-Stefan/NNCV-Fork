@@ -41,6 +41,7 @@ from torchvision.transforms.v2 import (
 
 # Efficient Net infrastructure import
 from efficientnet_pytorch import EfficientNet
+import segmentation_models_pytorch as smp
 
 # Mapping class IDs to train IDs
 id_to_trainid = {cls.id: cls.train_id for cls in Cityscapes.classes}
@@ -150,35 +151,46 @@ def main(args):
         shuffle=False,
         num_workers=args.num_workers
     )
-
+    ### --- Initial model --- ###
     # Define the model
     # model = model_pretrained(
     #     in_channels=3,  # RGB images
     #     n_classes=19,  # 19 classes in the Cityscapes dataset
     # ).to(device)
 
-    # 1. Declare the instance of the control class `EfficientNet`
-    # model = EfficientNet.from_name('efficientnet-b7') # Loading a not-pretrained model
-    model_pretrained = EfficientNet.from_pretrained('efficientnet-b7', num_classes=19) # Pretrained
+    ### --- Second model (the basis) --- ###
+    # # model = EfficientNet.from_name('efficientnet-b7') # Loading a not-pretrained model
+    # model_pretrained = EfficientNet.from_pretrained('efficientnet-b7', num_classes=19, in_channels=3) # Pretrained
 
+    # backbone_params:list = []
+    # forebone_params:list = []
+
+    # for _name, _param in model_pretrained.named_parameters():
+    #     if '_fc' in _name:
+    #         # # Debug statement 1 
+    #         # print("Name {}".format(_name, _param))
+    #         forebone_params.append(_param)
+    #     else:
+    #         backbone_params.append(_param)
+
+
+    # 1. Declare the instance of the control class `EfficientNet` with UNet chasis 
+    model_pretrained = smp.Unet(
+        encoder_name="efficientnet-b7",        # Use your chosen backbone
+        encoder_weights="imagenet",            # Start with pre-trained knowledge
+        in_channels=3,                         # RGB input
+        classes=19,                            # 19 Cityscapes evaluation classes
+        )
     # 2. Group Parameters for Differential Learning Rates
-    backbone_params:list = []
-    forebone_params:list = []
-
-    for _name, _param in model_pretrained.named_parameters():
-        if '_fc' in _name:
-            # # Debug statement 1 
-            # print("Name {}".format(_name, _param))
-            forebone_params.append(_param)
-        else:
-            backbone_params.append(_param)
+    backbone_params = model_pretrained.encoder.parameters()
+    head_params = list(model_pretrained.decoder.parameters()) + list(model_pretrained.segmentation_head.parameters())
 
     # Define the loss function
     criterion = nn.CrossEntropyLoss(ignore_index=255)  # Ignore the void class
 
     # Define the optimizer
     optimizer = AdamW([{'params':backbone_params, 'lr':args.lrs[0]},
-                       {'params':forebone_params, 'lr':args.lrs[1]}])
+                       {'params':head_params, 'lr':args.lrs[1]}])
 
     # Training loop
     best_valid_loss = float('inf')
