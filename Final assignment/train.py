@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 import wandb
 import torch
 import torch.nn as nn
-from torch.optim import AdamW
+from torch.optim import (AdamW,RMSprop)
 from torch.utils.data import DataLoader
 from torchvision.datasets import Cityscapes
 from torchvision.utils import make_grid
@@ -67,9 +67,9 @@ def get_args_parser():
     parser = ArgumentParser("Training script for a PyTorch U-Net model")
     parser.add_argument("--data-dir", type=str, default="./data/cityscapes", help="Path to the training data")
     parser.add_argument("--batch-size", type=int, default=48, help="Training batch size")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--lrs", nargs=2, type=float, default=[1e-5, 1e-3], help='Differential LRs: first backbone, second for head')
+    parser.add_argument("--lrs", nargs=2, type=float, default=[1e-5, 3e-4], help='Differential LRs: first backbone, second for head')
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for data loaders")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--experiment-id", type=str, default="efficientnet1-training", help="Experiment ID for Weights & Biases")
@@ -100,7 +100,7 @@ def main(args):
     # Define the transforms to apply to the data
     img_transform = Compose([
     ToImage(),
-    Resize((256, 256)),
+    Resize((320, 227)),
     ToDtype(torch.float32, scale=True),
     Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
@@ -109,7 +109,7 @@ def main(args):
     # Target transform (mask)
     target_transform = Compose([
         ToImage(),
-        Resize((256, 256), interpolation=InterpolationMode.NEAREST),
+        Resize((320, 227), interpolation=InterpolationMode.NEAREST),
         ToDtype(torch.int64),  # no scaling
     ])
 
@@ -147,8 +147,9 @@ def main(args):
     )
 
 
-    # 1. Initialize the model
+    # 1. Initialize the model and activate CUDA
     Model = get_model()
+    Model = Model.to(device)
 
     # 2. Group Parameters for Differential Learning Rates
     backbone_params = Model.encoder.parameters()
@@ -156,11 +157,13 @@ def main(args):
 
 
     # Define the loss function
-    criterion = nn.CrossEntropyLoss(ignore_index=255)  # Ignore the void class
+    criterion = smp.losses.DiceLoss(mode='multiclass',ignore_index=255, from_logits=True)
 
     # Define the optimizer
-    optimizer = AdamW([{'params':backbone_params, 'lr':args.lrs[0]},
-                       {'params':head_params, 'lr':args.lrs[1]}])
+    optimizer = RMSprop([{'params':backbone_params,'lr':args.lrs[0]},{'params':head_params,'lr':args.lrs[1]}], alpha=0.9, momentul=0.9, weight_decay=1e-5, eps=0.001)
+
+    # Define the Scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     # Training loop
     best_valid_loss = float('inf')
@@ -238,7 +241,9 @@ def main(args):
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
                 torch.save(Model.state_dict(), current_best_model_path)
-        
+
+	    scheduler.step()
+	    wandb.log({"learning_rate":optimizer.param_groups[0]['lr]}, step=(epoch+1)*len(train_dataloader))        
     print("Training complete!")
 
     # Save the model
@@ -255,4 +260,6 @@ def main(args):
 if __name__ == "__main__":
     parser = get_args_parser()
     args = parser.parse_args()
+    # Make sure that there is no memory build up
+    torch.cuda.empty_cache()
     main(args)
