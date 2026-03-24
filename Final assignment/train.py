@@ -34,6 +34,7 @@ from torchvision.transforms.v2 import (
     ToDtype,
     InterpolationMode
 )
+import segmentation_models_pytorch as smp
 ### Specific imports - End - ###
 
 ### Model Import - Start - ###
@@ -160,7 +161,7 @@ def main(args):
     criterion = smp.losses.DiceLoss(mode='multiclass',ignore_index=255, from_logits=True)
 
     # Define the optimizer
-    optimizer = RMSprop([{'params':backbone_params,'lr':args.lrs[0]},{'params':head_params,'lr':args.lrs[1]}], alpha=0.9, momentul=0.9, weight_decay=1e-5, eps=0.001)
+    optimizer = RMSprop([{'params':backbone_params,'lr':args.lrs[0]},{'params':head_params,'lr':args.lrs[1]}], alpha=0.9, momentum=0.9, weight_decay=1e-5, eps=0.001)
 
     # Define the Scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -193,7 +194,7 @@ def main(args):
             }, step=epoch * len(train_dataloader) + i)
             
       	# Validation
-        model_pretrained.eval()
+        Model.eval()
         with torch.no_grad():
             losses = []
             for i, (images, labels) in enumerate(valid_dataloader):
@@ -203,7 +204,7 @@ def main(args):
 
                 labels = labels.long().squeeze(1)  # Remove channel dimension
 
-                outputs = model_pretrained(images)
+                outputs = Model(images)
                 loss = criterion(outputs, labels)
                 losses.append(loss.item())
 
@@ -240,14 +241,14 @@ def main(args):
                     output_dir, 
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
-                torch.save(model_pretrained.state_dict(), current_best_model_path)
+                torch.save(Model.state_dict(), current_best_model_path)
         scheduler.step()
         wandb.log({"learning_rate": optimizer.param_groups[0]['lr']}, step=(epoch + 1) * len(train_dataloader))
     print("Training complete!")
 
     # Save the model
     torch.save(
-        model_pretrained.state_dict(),
+        Model.state_dict(),
         os.path.join(
             output_dir,
             f"final_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
