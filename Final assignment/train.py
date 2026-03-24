@@ -192,8 +192,8 @@ def main(args):
                 "epoch": epoch + 1,
             }, step=epoch * len(train_dataloader) + i)
             
-        # Validation
-        Model.eval()
+      	# Validation
+        model_pretrained.eval()
         with torch.no_grad():
             losses = []
             for i, (images, labels) in enumerate(valid_dataloader):
@@ -203,10 +203,10 @@ def main(args):
 
                 labels = labels.long().squeeze(1)  # Remove channel dimension
 
-                outputs = Model(images)
+                outputs = model_pretrained(images)
                 loss = criterion(outputs, labels)
                 losses.append(loss.item())
-            
+
                 if i == 0:
                     predictions = outputs.softmax(1).argmax(1)
 
@@ -226,7 +226,7 @@ def main(args):
                         "predictions": [wandb.Image(predictions_img)],
                         "labels": [wandb.Image(labels_img)],
                     }, step=(epoch + 1) * len(train_dataloader) - 1)
-            
+
             valid_loss = sum(losses) / len(losses)
             wandb.log({
                 "valid_loss": valid_loss
@@ -240,15 +240,14 @@ def main(args):
                     output_dir, 
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
-                torch.save(Model.state_dict(), current_best_model_path)
-
-	    scheduler.step()
-	    wandb.log({"learning_rate":optimizer.param_groups[0]['lr]}, step=(epoch+1)*len(train_dataloader))        
+                torch.save(model_pretrained.state_dict(), current_best_model_path)
+        scheduler.step()
+        wandb.log({"learning_rate": optimizer.param_groups[0]['lr']}, step=(epoch + 1) * len(train_dataloader))
     print("Training complete!")
 
     # Save the model
     torch.save(
-        Model.state_dict(),
+        model_pretrained.state_dict(),
         os.path.join(
             output_dir,
             f"final_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
@@ -260,6 +259,6 @@ def main(args):
 if __name__ == "__main__":
     parser = get_args_parser()
     args = parser.parse_args()
-    # Make sure that there is no memory build up
+    # Make sure cache memory is free
     torch.cuda.empty_cache()
     main(args)
