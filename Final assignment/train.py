@@ -101,7 +101,7 @@ def main(args):
     # Define the transforms to apply to the data
     img_transform = Compose([
     ToImage(),
-    Resize((320, 227)),
+    Resize((320, 254)),
     ToDtype(torch.float32, scale=True),
     Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
@@ -110,7 +110,7 @@ def main(args):
     # Target transform (mask)
     target_transform = Compose([
         ToImage(),
-        Resize((320, 227), interpolation=InterpolationMode.NEAREST),
+        Resize((320, 254), interpolation=InterpolationMode.NEAREST),
         ToDtype(torch.int64),  # no scaling
     ])
 
