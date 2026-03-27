@@ -178,8 +178,9 @@ def main(args):
         # Training
         Model.train()
         for i, (images, labels) in enumerate(train_dataloader):
-	    	if random.random() > 0.5:
-    			images = F.horizontal_flip(images) # Flipped on GPU
+	    
+			if random.random() > 0.5:
+    	        images = F.horizontal_flip(images) # Flipped on GPU
     			labels = F.horizontal_flip(labels)
 
             labels = convert_to_train_id(labels)  # Convert class IDs to train IDs
