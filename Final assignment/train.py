@@ -32,9 +32,12 @@ from torchvision.transforms.v2 import (
     Resize,
     ToImage,
     ToDtype,
-    InterpolationMode
+    InterpolationMode,
+    RandomHorizontalFlip
 )
 import segmentation_models_pytorch as smp
+from torchvision.transforms.v2 import functional as F
+import random
 ### Specific imports - End - ###
 
 ### Model Import - Start - ###
@@ -101,7 +104,7 @@ def main(args):
     # Define the transforms to apply to the data
     img_transform = Compose([
     ToImage(),
-    Resize((320, 254)),
+    Resize((256, 512)),
     ToDtype(torch.float32, scale=True),
     Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
@@ -110,7 +113,7 @@ def main(args):
     # Target transform (mask)
     target_transform = Compose([
         ToImage(),
-        Resize((320, 254), interpolation=InterpolationMode.NEAREST),
+        Resize((256, 512), interpolation=InterpolationMode.NEAREST),
         ToDtype(torch.int64),  # no scaling
     ])
 
@@ -175,10 +178,12 @@ def main(args):
         # Training
         Model.train()
         for i, (images, labels) in enumerate(train_dataloader):
+	    if random.random() > 0.5:
+    		images = F.horizontal_flip(images) # Flipped on GPU
+    		labels = F.horizontal_flip(labels)
 
             labels = convert_to_train_id(labels)  # Convert class IDs to train IDs
             images, labels = images.to(device), labels.to(device)
-
             labels = labels.long().squeeze(1)  # Remove channel dimension
 
             optimizer.zero_grad()
