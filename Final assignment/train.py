@@ -12,6 +12,7 @@ allowing you to easily modify hyperparameters using a command-line argument pars
 
 Feel free to customize the script as needed for your use case.
 """
+
 ### Regular imports - Start - ###
 import os
 from argparse import ArgumentParser
@@ -35,6 +36,7 @@ from torchvision.transforms.v2 import (
     InterpolationMode,
     RandomHorizontalFlip
 )
+
 import segmentation_models_pytorch as smp
 from torchvision.transforms.v2 import functional as F
 import random
@@ -44,16 +46,26 @@ import random
 from model import get_model
 ### Model Import - End - ###
 
-# Mapping class IDs to train IDs
-id_to_trainid = {cls.id: cls.train_id for cls in Cityscapes.classes}
+
+#TODO Improve the looping mechanism once you have reach a super optimal zone;
+# 1. Mapping class IDs to train IDs
+id_to_trainid = {cls.id: cls.train_id for cls in Cityscapes.classes} # Creates a dictionary of mapped classes through dict-comprehension
 def convert_to_train_id(label_img: torch.Tensor) -> torch.Tensor:
+    """Maps raw Cityscapes class IDs to the 19 standard training IDs used for evaluation, setting ignored classes to 255."""
     return label_img.apply_(lambda x: id_to_trainid[x])
 
-# Mapping train IDs to color
+# 2. Mapping train IDs to color
 train_id_to_color = {cls.train_id: cls.color for cls in Cityscapes.classes if cls.train_id != 255}
 train_id_to_color[255] = (0, 0, 0)  # Assign black to ignored labels
 
 def convert_train_id_to_color(prediction: torch.Tensor) -> torch.Tensor:
+    """
+    Builds a Paint-by-Number map. Acts as a sort of engine painter
+    e.g.,
+    The Logic: It looks at the official Cityscapes class list and says: "If the ID is 0 (Road), use the color Purple (128, 64, 128). If it's 13 (Car), use Blue (0, 0, 142)."
+    The Catch: Since we mapped all the "junk" classes to 255 earlier, it explicitly tells the code: "Anything labeled 255 should be painted Black (0, 0, 0)."
+    """
+
     batch, _, height, width = prediction.shape
     color_image = torch.zeros((batch, 3, height, width), dtype=torch.uint8)
 
@@ -178,14 +190,23 @@ def main(args):
         # Training
         Model.train()
         for i, (images, labels) in enumerate(train_dataloader):
+            # 1. Map IDs first (Vectorized is best here)
+            labels = convert_to_train_id(labels) 
+    
+            # 2. Sample-level Augmentation (Independent for each image in batch)
+            augmented_images, augmented_labels = [], []
+            
+            for img, lbl in zip(images, labels):
+                if random.random() > 0.5:
+                    img = F.horizontal_flip(img)
+                    lbl = F.horizontal_flip(lbl)
+                augmented_images.append(img)
+                augmented_labels.append(lbl)
+            
+            # Stack them back into batches
+            images = torch.stack(augmented_images)
+            labels = torch.stack(augmented_labels)
 
-			labels = convert_to_train_id(labels)  # Convert class IDs to train IDs
-	
-			if random.random() > 0.5:
-    	        images = F.horizontal_flip(images) # Flipped on GPU
-    			labels = F.horizontal_flip(labels)
-
-       
             images, labels = images.to(device), labels.to(device)
             labels = labels.long().squeeze(1)  # Remove channel dimension
 
